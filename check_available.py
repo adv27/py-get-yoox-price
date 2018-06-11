@@ -7,6 +7,7 @@ from currency import get_USD_rate
 import re
 from re import sub
 from decimal import Decimal
+import json
 
 USD_to_other_rates = dict()
 
@@ -26,16 +27,45 @@ def get_countries():
         })
     return countries
 
+def get_rates():
+    return json.load(open('rates.txt','r'))
 
 def get_price(price_div):
-    price = dict()
-
-    prog = re.compile(r'(\d+)')
+    price = None
 
     currency = price_div.find(
         'span',
         {'itemprop': 'priceCurrency'}
     )['content']
+
+    price_div_text = price_div.text.split('\r')[0].replace('\n', ' ').strip()
+
+    if currency != 'USD':
+        prog = re.compile(r'(\(([^\)]+)\))')
+        m = prog.findall(price_div_text)
+        if m:
+            currency = 'USD'
+            price = ' '.join(map(lambda l: l[1],m))
+            # price = {
+            #     currency:' '.join(map(lambda l: l[1],m))
+            #     }
+    # else:
+    #     # price = {
+    #     #     currency:price_div_text
+    #     # }
+    #     price = price_div_text
+    if price is None:
+        price = price_div_text
+
+    if currency == 'USD':
+        prog = re.compile(r'(\$ (\d+[,]*\d+))')
+        m = prog.findall(price)
+        print('{} - {}'.format(price, m))
+
+    return price
+    # return prog.findall(p)
+
+
     current_price = price_div.find(
         'span',
         {'itemprop': 'price'}
@@ -56,6 +86,9 @@ def get_price(price_div):
         original_price = float(sub(r'[^\d.]', '', original_price))
         price[currency]['original'] = original_price
 
+    '''
+    If the currency not in USD, then convert the price to USD
+    '''
     if currency != 'USD':
         if currency not in USD_to_other_rates:
             USD_to_other_rates[currency] = get_USD_rate(currency)
@@ -68,6 +101,12 @@ def get_price(price_div):
             original_price_USD = original_price/rate
             price['USD']['original'] = original_price_USD
     return price
+
+def get_size(item_size_div):
+    sizes = item_size_div.find_all('li')
+    # filter sold out size
+    sizes = filter(lambda size: 'disabled' not in size['class'], sizes)
+    return sizes
 
 
 def check_size(country, item_code):
@@ -85,9 +124,11 @@ def check_size(country, item_code):
         if item_sizes is not None:
             sizes = item_sizes.find_all('li')
             # filter sold out size
-            sizes = filter(lambda size: 'disabled' not in size['class'], sizes)
+            # sizes = filter(lambda size: 'disabled' not in size['class'], sizes)
             item_detail_div = soup.find('div', {'id': 'js-item-details'})
             price_div = item_detail_div.find('div', {'id': 'item-price'})
+            # print(country['name'],price_div.text.replace('\n', ' '))
+            # return
             # currency = price_div.find(
             #     'span',
             #     {'itemprop': 'priceCurrency'}
@@ -112,16 +153,21 @@ def check_size(country, item_code):
             #         current_price
             #     ).strip()
             # ))
+
             price = get_price(price_div)
-            print('Site {}:'.format(country['name']))
-            for currency in price:
-                print('{}: {}'.format(currency, price[currency]))
+            # return
+            # print('Site {}:'.format(country['name']))
+            # # if price:
+            #     # print('Site {}: {}'.format(country['name'], price))
+            # # return 'Site {}: {} {}'.format(country['name'], price[])
+            # for currency in price:
+            #     print('{}: {}'.format(currency, price[currency]))
         else:
             print('Site {} NOT AVAILABLE'.format(country['name']))
 
 
 def check_size_wrapper(args):
-    check_size(*args)
+    return check_size(*args)
 
 
 def main():
