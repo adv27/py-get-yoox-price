@@ -2,3 +2,5 @@ access_key.txt
 access_key.template
 __pycache__/
 venv/
+config.py
+.idea/
