@@ -1,149 +1,173 @@
-from bs4 import BeautifulSoup
-import requests
-from multiprocessing import Pool
-from itertools import repeat
-
-from currency import get_USD_rate
+import json
 import re
-from re import sub
+import sys
 from decimal import Decimal
+from io import StringIO
+from itertools import repeat
+from multiprocessing import Pool
+from re import sub
 
-USD_to_other_rates = dict()
+import requests
+from bs4 import BeautifulSoup
+
+
+class Country(object):
+    def __init__(self, url, name):
+        self.url = url
+        self.name = name
+        if self.name == 'CHINA':
+            self.url = 'https://www.yoox.com/cn'
+        self.code = self.url.split('/')[-1]
+
+    def __repr__(self):
+        return '{} - {}'.format(self.name, self.code)
+
+
+class Size(object):
+    def __init__(self, default_label, alternative_label, quantity):
+        self.default_label = default_label
+        self.alternative_label = alternative_label
+        self.quantity = quantity
+
+    def __repr__(self):
+        return '{}{}{}'.format(
+            self.default_label.ljust(50),
+            self.alternative_label.ljust(50),
+            self.quantity
+        )
+
+
+class Item(object):
+    STT_SOLDOUT = 0
+    STT_AVAILABLE = 1
+    STT_NOT_AVAILABLE = 2
+
+    def __init__(self, country, code):
+        self.country = country
+        self.code = code
+
+        self.__page = self.__get_page()
+        self.__soup = BeautifulSoup(self.__page.content, 'html.parser')
+        self.__html_code = self.__page.content.decode('utf-8')
+
+        self.status = self.STT_NOT_AVAILABLE
+        if self.__soup.select('div.itemSoldOutMessage'):
+            self.status = self.STT_SOLDOUT
+        elif self.__soup.select('div#itemColors'):
+            self.status = self.STT_AVAILABLE
+            self.price = self.__get_price_EUR()
+            self.promo = self.__get_promotion()
+            self.sizes = self.__get_sizes()
+
+    def __get_page(self):
+        URL = '{country}/{code}/item'
+        url = URL.format(country=self.country.url, code=self.code)
+        # proxy_dict = {'http' :'10.22.194.32:8080','https' :'10.22.194.32:8080'}
+        # r = requests.get(url, proxies=proxy_dict)
+        r = requests.get(url)
+        return r
+
+    def __get_price_EUR(self):
+        pattern = r'\["product_discountprice_EUR"\] = "(\d*.?\d*)"'
+        match = re.search(pattern, self.__html_code)
+        price_in_EUR = match.group(1)
+        return price_in_EUR
+
+    def __get_promotion(self):
+        promo = self.__soup.find('div', {'class': 'box-highlighted font-sans text-size-default default-padding text-primary'})
+        if promo:
+            return promo.text.strip()
+        return None
+
+    def __get_sizes(self):
+        pattern = r'jsInit.item.colorSizeJson = (.*?);'
+        matches = re.search(pattern, self.__html_code)
+        match = matches.group(1)
+        color_size_json = json.loads(match)
+        sizes = color_size_json['Sizes']
+        qty = color_size_json['Qty']
+
+        size_list = list()
+
+        for size in sizes:
+            q = list(filter(lambda qq: qq.split('_')[-1] == str(size['Id']), qty))
+            if q:
+                size.update({
+                    'Qty': qty[q[0]]
+                })
+                s = Size(size['DefaultSizeLabel'], size['AlternativeSizeLabel'], size['Qty'])
+                size_list.append(s)
+
+        return size_list
 
 
 def get_countries():
     countries = list()
     html = ''
     with open('country_list_html.html', 'r') as file:
+        # with open('country_list_short.html', 'r') as file:
         for line in file:
             html += line
     soup = BeautifulSoup(html, 'html.parser')
     anchors = soup.find_all('a', {'class': 'js-track-me js-switchcountry'})
     for a in anchors:
-        countries.append({
-            'url': a['href'],
-            'name': a['title']
-        })
+        countries.append(Country(a['href'], a['title']))
     return countries
 
 
-def get_price(price_div):
-    price = dict()
-
-    prog = re.compile(r'(\d+)')
-
-    currency = price_div.find(
-        'span',
-        {'itemprop': 'priceCurrency'}
-    )['content']
-    current_price = price_div.find(
-        'span',
-        {'itemprop': 'price'}
-    ).text.strip()
-    # current_price = float(prog.search(current_price).group(0))
-    current_price = float(sub(r'[^\d.]', '', current_price))
-    price[currency] = {
-        'current': current_price,
-    }
-    # if this item is on sale
-    original_price = price_div.find(
-        'span',
-        {'class': 'text-secondary text-linethrough'}
-    )
-    if original_price is not None:
-        original_price = original_price.text.strip()
-        # original_price = float(prog.search(original_price).group(0))
-        original_price = float(sub(r'[^\d.]', '', original_price))
-        price[currency]['original'] = original_price
-
-    if currency != 'USD':
-        if currency not in USD_to_other_rates:
-            USD_to_other_rates[currency] = get_USD_rate(currency)
-        rate = USD_to_other_rates[currency]
-        current_price_USD = current_price/rate
-        price['USD'] = {
-            'current': current_price_USD
-        }
-        if original_price is not None:
-            original_price_USD = original_price/rate
-            price['USD']['original'] = original_price_USD
-    return price
+def printer(item):
+    pp = StringIO()
+    print(''.ljust(100, '-'), file=pp)
+    print(item.country, file=pp)
+    if item.status == Item.STT_AVAILABLE:
+        print('AVAILABLE', file=pp)
+        print('{}{}'.format('PRICE'.ljust(30, '-'), item.price), file=pp)
+        if item.promo:
+            print('PROMOTION: {}'.format(item.promo), file=pp)
+        for size in item.sizes:
+            print(size, file=pp)
+    elif item.status == Item.STT_SOLDOUT:
+        print('SOLDOUT :(', file=pp)
+    elif item.status == Item.STT_NOT_AVAILABLE:
+        print('NOT AVAILBLE', file=pp)
+    print(''.ljust(100, '-'), file=pp)
+    return pp.getvalue()
 
 
 def check_size(country, item_code):
-    URL = '{country}/{code}/item'
-    if country['name'] == 'CHINA':
-        country['url'] = 'https://www.yoox.com/cn'
-    url = URL.format(country=country['url'], code=item_code)
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    soldout = soup.find('div', {'class': 'soldout'})
-    if soldout is not None:
-        print('Site {} SOLD OUT :('.format(country['name']))
-    else:
-        item_sizes = soup.find('div', {'id': 'itemSizes'})
-        if item_sizes is not None:
-            sizes = item_sizes.find_all('li')
-            # filter sold out size
-            sizes = filter(lambda size: 'disabled' not in size['class'], sizes)
-            item_detail_div = soup.find('div', {'id': 'js-item-details'})
-            price_div = item_detail_div.find('div', {'id': 'item-price'})
-            # currency = price_div.find(
-            #     'span',
-            #     {'itemprop': 'priceCurrency'}
-            # )['content']
-            # current_price = price_div.find(
-            #     'span',
-            #     {'itemprop': 'price'}
-            # ).text.strip()
-            # # if this item is on sale
-            # original_price = price_div.find(
-            #     'span',
-            #     {'class': 'text-secondary text-linethrough'}
-            # )
-            # if original_price is not None:
-            #     original_price = original_price.text.strip()
-            # print('Site {country} - PRICE: {price} - SIZE AVAIABLE: {sizes}'.format(
-            #     country=country['name'],
-            #     sizes=' - '.join(map(lambda size: size['title'], sizes)),
-            #     price='({}) {}{}'.format(
-            #         currency,
-            #         '{} -> '.format(original_price) if original_price is not None else '',
-            #         current_price
-            #     ).strip()
-            # ))
-            price = get_price(price_div)
-            print('Site {}:'.format(country['name']))
-            for currency in price:
-                print('{}: {}'.format(currency, price[currency]))
-        else:
-            print('Site {} NOT AVAILABLE'.format(country['name']))
+    item = Item(country=country, code=item_code)
+    return item
+    # printer(item)
 
 
 def check_size_wrapper(args):
-    check_size(*args)
+    i = check_size(*args)
+    return printer(i)
 
 
 def main():
-    item_code = '41753815EK'
-    countries = get_countries()
-    print('There are {} countr{}'.format(
-        len(countries),
-        'ies' if len(countries) > 1 else 'y'
-    ))
-    with Pool(processes=10) as pool:
-        # args = ((country, item_code) for country in countries)
-        results = pool.map(
-            check_size_wrapper,
-            zip(
-                countries,
-                repeat(item_code)
+    if len(sys.argv) == 2:
+        item_code = sys.argv[1]
+        # country = Country('https://www.yoox.com/us', 'UNITED STATES')
+        # check_sizee(country, item_code)
+        # return
+        countries = get_countries()
+        print('There are {} countr{}'.format(
+            len(countries),
+            'ies' if len(countries) > 1 else 'y'
+        ))
+
+        with Pool(processes=10) as pool:
+            results = pool.map(
+                check_size_wrapper,
+                zip(countries, repeat(item_code))
             )
-        )
-        # for r in results:
-        #     print(r)
-        pool.close()
-        pool.join()
+            pool.close()
+            pool.join()
+            for r in results:
+                print(r)
+    else:
+        print('Please provide item code!!!')
 
 
 if __name__ == '__main__':
