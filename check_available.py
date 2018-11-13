@@ -60,8 +60,8 @@ class Item(object):
             self.sizes = self.__get_sizes()
 
     def __get_page(self):
-        # URL = '{country}/{code}/item'
-        URL = '{country}/itemDetails?cod10={code}'
+        URL = '{country}/{code}/item'
+        # URL = '{country}/itemDetails?cod10={code}'
         url = URL.format(country=self.country.url, code=self.code)
         # proxy_dict = {'http' :'10.22.194.32:8080','https' :'10.22.194.32:8080'}
         # r = requests.get(url, proxies=proxy_dict)
