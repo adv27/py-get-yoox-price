@@ -63,16 +63,12 @@ class Item(object):
         URL = '{country}/{code}/item'
         # URL = '{country}/itemDetails?cod10={code}'
         url = URL.format(country=self.country.url, code=self.code)
-        # proxy_dict = {'http' :'10.22.194.32:8080','https' :'10.22.194.32:8080'}
-        # r = requests.get(url, proxies=proxy_dict)
-        r = requests.get(url)
-        return r
+        return requests.get(url)
 
     def __get_price_EUR(self):
         pattern = r'\["product_discountprice_EUR"\] = "(\d*.?\d*)"'
         match = re.search(pattern, self.__html_code)
-        price_in_EUR = match.group(1)
-        return price_in_EUR
+        return match.group(1)
 
     def __get_promotion(self):
         promo = self.__soup.find('div', {'class': 'box-highlighted font-sans text-size-default default-padding text-primary'})
@@ -88,7 +84,7 @@ class Item(object):
         sizes = color_size_json['Sizes']
         qty = color_size_json['Qty']
 
-        size_list = list()
+        size_list = []
 
         for size in sizes:
             q = list(filter(lambda qq: qq.split('_')[-1] == str(size['Id']), qty))
@@ -103,7 +99,6 @@ class Item(object):
 
 
 def get_countries():
-    countries = list()
     html = ''
     with open('country_list_html.html', 'r') as file:
         # with open('country_list_short.html', 'r') as file:
@@ -111,9 +106,7 @@ def get_countries():
             html += line
     soup = BeautifulSoup(html, 'html.parser')
     anchors = soup.find_all('a', {'class': 'js-track-me js-switchcountry'})
-    for a in anchors:
-        countries.append(Country(a['href'], a['title']))
-    return countries
+    return [Country(a['href'], a['title']) for a in anchors]
 
 
 def printer(item):
@@ -136,8 +129,7 @@ def printer(item):
 
 
 def check_size(country, item_code):
-    item = Item(country=country, code=item_code)
-    return item
+    return Item(country=country, code=item_code)
     # printer(item)
 
 
